@@ -174,62 +174,68 @@ class Parser:
 
 class Printer:
     def __init__(self) -> None:
-        pass
+        self._scheme = {
+            'elements': 3,
+            'indices': 13,
+            'symbols': 6,
+            'parentheses': 14,
+            'coefficients': 10,
+            'cli': 4
+        }
 
-    def write(self, *s: Any, c: int | None = None) -> None:
+    def write(self, *s: Any, c: str | None = None) -> None:
         if c is not None:
-            print(f'\033[38;5;{c}m', end='')
+            print(f'\033[38;5;{self._scheme[c]}m', end='')
         print(''.join(map(str, s)), end='')
         if c is not None:
             print('\033[0m', end='')
 
-    def print_element(self, el: ElementNode) -> None:
-        self.write(el.symbol)
+    def write_element(self, el: ElementNode) -> None:
+        self.write(el.symbol, c='elements')
         if el.count > 1:
-            self.write(el.count)
+            self.write(el.count, c='indices')
 
-    def print_group(self, group: GroupNode) -> None:
-        self.write('(')
+    def write_group(self, group: GroupNode) -> None:
+        self.write('(', c='parentheses')
         for el in group.elements:
-            self.print_element_or_group(el)
-            self.write(' ')
-        self.write(')')
+            self.write_element_or_group(el)
+        self.write(')', c='parentheses')
         if group.count > 1:
-            self.write(group.count)
+            self.write(group.count, c='indices')
 
-    def print_element_or_group(self, el: ElementNode | GroupNode) -> None:
+    def write_element_or_group(self, el: ElementNode | GroupNode) -> None:
         if isinstance(el, ElementNode):
-            self.print_element(el)
+            self.write_element(el)
         else:
-            self.print_group(el)
+            self.write_group(el)
 
-    def print_compound(self, compound: CompoundNode) -> None:
+    def write_compound(self, compound: CompoundNode) -> None:
         for el in compound.elements:
-            self.print_element_or_group(el)
+            self.write_element_or_group(el)
 
-    def print_reaction(self,
+    def write_reaction(self,
                        ins:  list[tuple[int, CompoundNode]],
                        outs: list[tuple[int, CompoundNode]]) -> None:
         for n, el in ins[:-1]:
             if n > 1:
-                self.write(n)
-            self.print_compound(el)
-            self.write(' + ')
+                self.write(n, c='coefficients')
+            self.write_compound(el)
+            self.write(' + ', c='symbols')
 
         if ins[-1][0] > 1:
-            self.write(ins[-1][0])
-        self.print_compound(ins[-1][1])
-        self.write(' -> ')
+            self.write(ins[-1][0], c='coefficients')
+        self.write_compound(ins[-1][1])
+        self.write(' -> ', c='symbols')
 
         for n, el in outs[:-1]:
             if n > 1:
-                self.write(n)
-            self.print_compound(el)
-            self.write(' + ')
+                self.write(n, c='coefficients')
+            self.write_compound(el)
+            self.write(' + ', c='symbols')
 
         if outs[-1][0] > 1:
-            self.write(outs[-1][0])
-        self.print_compound(outs[-1][1])
+            self.write(outs[-1][0], c='coefficients')
+        self.write_compound(outs[-1][1])
 
 
 class EquationSolver:
@@ -354,33 +360,21 @@ class EquationSolver:
 def main():
     printer = Printer()
     while True:
-        question = input('?> ').strip()
+        printer.write('?> ', c='cli')
+        question = input().strip()
         if question.strip() == '':
             continue
         solver = EquationSolver(question)
         solver.run()
         if not solver.parsed():
-            print('   Invalid equation!')
+            printer.write('   Invalid equation!\n')
             continue
         if not solver.solved():
-            print('   Unsolvable equation!')
+            printer.write('   Unsolvable equation!\n')
             continue
-        printer.write('!> ')
-        printer.print_reaction(*solver.result())
+        printer.write('!> ', c='cli')
+        printer.write_reaction(*solver.result())
         printer.write('\n')
-    # while True:
-    #     question = input(f'\033[38;5;{INTERFACE}m?> \033[0m').strip()
-    #     if question.strip() == '':
-    #         continue
-    #     solver = EquationSolver(question)
-    #     solver.run()
-    #     if not solver.parsed():
-    #         print(f'   \033[38;5;{ERRORS}mInvalid equation!\033[0m')
-    #         continue
-    #     if not solver.solved():
-    #         print(f'   \033[38;5;{COMPOUNDS}mUnsolvable equation!\033[0m')
-    #         continue
-    #     print(f'\033[38;5;{INTERFACE}m!> \033[0m{solver.answer()}')
 
 
 if __name__ == '__main__':
