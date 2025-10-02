@@ -9,7 +9,7 @@ INDICES = 10
 SYMBOLS = 6
 
 
-class Element:
+class ElementNode:
     def __init__(self, symbol: str, count: int) -> None:
         self.symbol = symbol
         self.count = count
@@ -18,8 +18,9 @@ class Element:
         return f'{self.symbol}{self.count}' if self.count > 1 else self.symbol
 
 
-class Group:
-    def __init__(self, elements: list['Element | Group'], count: int) -> None:
+class GroupNode:
+    def __init__(self, elements: list['ElementNode | GroupNode'],
+                 count: int) -> None:
         self.elements = elements
         self.count = count
 
@@ -28,25 +29,25 @@ class Group:
             f'{self.count}' if self.count > 1 else '')
 
 
-class Compound:
-    def __init__(self, elements: list['Element | Group']) -> None:
+class CompoundNode:
+    def __init__(self, elements: list['ElementNode | GroupNode']) -> None:
         self.elements = elements
 
     def __repr__(self) -> str:
         return ''.join(map(str, self.elements))
 
 
-class Reaction:
+class ReactionNode:
     def __init__(self,
-                 ins: list['Element | Group'],
-                 outs: list['Element | Group']) -> None:
+                 ins: list['ElementNode | GroupNode'],
+                 outs: list['ElementNode | GroupNode']) -> None:
         self.ins = ins
         self.outs = outs
 
 
 class Parser:
     def __init__(self, src: str) -> None:
-        self._src = src
+        self._src = src.strip()
         self._cursor = 0
         self._N = len(self._src)
 
@@ -79,7 +80,7 @@ class Parser:
             self.inc()
         return int(self._src[begin:self._cursor])
 
-    def parseElement(self) -> tuple[Element, tuple[str, int]]:
+    def parseElement(self) -> tuple[ElementNode, tuple[str, int]]:
         if not self.curr() in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
             raise ValueError(
                 'Element name must start with a capital letter')
@@ -93,19 +94,20 @@ class Parser:
         if self._cursor < self._N and self.curr().isdigit():
             n = self.parseInt()
 
-        return Element(symbol, n), (symbol, n)
+        return ElementNode(symbol, n), (symbol, n)
 
-    def parseCompoundElement(self) -> tuple[Element | Group, dict[str, int]]:
+    def parseCompoundElement(self) -> tuple[ElementNode | GroupNode,
+                                            dict[str, int]]:
         if self.curr() == '(':
             return self.parseGroup()
         el, struct = self.parseElement()
         return el, {struct[0]: struct[1]}
 
-    def parseGroup(self) -> tuple[Group, dict[str, int]]:
+    def parseGroup(self) -> tuple[GroupNode, dict[str, int]]:
         if self.curr() != '(':
             raise ValueError('A group must start with a "("')
         self.inc()
-        elements: list[Group | Element] = []
+        elements: list[GroupNode | ElementNode] = []
         struct: dict[str, int] = {}
         while not self.eof() and self.curr() != ')':
             el, s = self.parseCompoundElement()
@@ -125,10 +127,10 @@ class Parser:
             n = self.parseInt()
         for k, v in struct.items():
             struct[k] = v * n
-        return Group(elements, n), struct
+        return GroupNode(elements, n), struct
 
-    def parseCompound(self) -> tuple[Compound, dict[str, int]]:
-        elements: list[Group | Element] = []
+    def parseCompound(self) -> tuple[CompoundNode, dict[str, int]]:
+        elements: list[GroupNode | ElementNode] = []
         struct: dict[str, int] = {}
         while self.curr() in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ(':
             el, s = self.parseCompoundElement()
@@ -138,11 +140,11 @@ class Parser:
                     struct[k] += v
                 else:
                     struct[k] = v
-        return Compound(elements), struct
+        return CompoundNode(elements), struct
 
-    def parseEquationSide(self) -> tuple[list[Compound], set[str],
+    def parseEquationSide(self) -> tuple[list[CompoundNode], set[str],
                                          list[dict[str, int]]]:
-        compounds: list[Compound] = []
+        compounds: list[CompoundNode] = []
         elements_total: set[str] = set()
         amounts_total: list[dict[str, int]] = []
 
@@ -157,8 +159,8 @@ class Parser:
 
         return compounds, elements_total, amounts_total
 
-    def parseEquation(self) -> tuple[list[Compound],
-                                     list[Compound],
+    def parseEquation(self) -> tuple[list[CompoundNode],
+                                     list[CompoundNode],
                                      list[dict[str, int]],
                                      list[dict[str, int]],
                                      set[str]]:
@@ -170,10 +172,72 @@ class Parser:
         return left[0], right[0], left[2], right[2], left[1] | right[1]
 
 
+class Printer:
+    def __init__(self) -> None:
+        pass
+
+    def write(self, *s: Any, c: int | None = None) -> None:
+        if c is not None:
+            print(f'\033[38;5;{c}m', end='')
+        print(''.join(map(str, s)), end='')
+        if c is not None:
+            print('\033[0m', end='')
+
+    def print_element(self, el: ElementNode) -> None:
+        self.write(el.symbol)
+        if el.count > 1:
+            self.write(el.count)
+
+    def print_group(self, group: GroupNode) -> None:
+        self.write('(')
+        for el in group.elements:
+            self.print_element_or_group(el)
+            self.write(' ')
+        self.write(')')
+        if group.count > 1:
+            self.write(group.count)
+
+    def print_element_or_group(self, el: ElementNode | GroupNode) -> None:
+        if isinstance(el, ElementNode):
+            self.print_element(el)
+        else:
+            self.print_group(el)
+
+    def print_compound(self, compound: CompoundNode) -> None:
+        for el in compound.elements:
+            self.print_element_or_group(el)
+
+    def print_reaction(self,
+                       ins:  list[tuple[int, CompoundNode]],
+                       outs: list[tuple[int, CompoundNode]]) -> None:
+        for n, el in ins[:-1]:
+            if n > 1:
+                self.write(n)
+            self.print_compound(el)
+            self.write(' + ')
+
+        if ins[-1][0] > 1:
+            self.write(ins[-1][0])
+        self.print_compound(ins[-1][1])
+        self.write(' -> ')
+
+        for n, el in outs[:-1]:
+            if n > 1:
+                self.write(n)
+            self.print_compound(el)
+            self.write(' + ')
+
+        if outs[-1][0] > 1:
+            self.write(outs[-1][0])
+        self.print_compound(outs[-1][1])
+
+
 class EquationSolver:
     def __init__(self, equation: str) -> None:
         self._parser = Parser(equation)
-        self._answer = ''
+        self._answer: tuple[
+            list[tuple[int, CompoundNode]],
+            list[tuple[int, CompoundNode]]] = ([], [])
 
         self._elements = []
 
@@ -189,22 +253,14 @@ class EquationSolver:
         self._parsed = False
         self._solved = False
 
-        self._string_builder: list[str] = []
-
-    def write(self, *s: Any, c: int | None = None) -> None:
-        if c is not None:
-            self._string_builder.append(f'\033[38;5;{c}m')
-        self._string_builder.extend(map(str, s))
-        if c is not None:
-            self._string_builder.append('\033[0m')
-
     def parsed(self) -> bool:
         return self._parsed
 
     def solved(self) -> bool:
         return self._solved
 
-    def answer(self) -> str:
+    def result(self) -> tuple[list[tuple[int, CompoundNode]],
+                              list[tuple[int, CompoundNode]]]:
         return self._answer
 
     def parse(self) -> None:
@@ -274,63 +330,57 @@ class EquationSolver:
             self._result.append(m[i][cols].numerator * c
                                 // m[i][cols].denominator)
 
-    def buildAnswer(self) -> None:
-        # creating answer
-        for i in range(self._ins_count-1):
-            if self._result[i] != 1:
-                self.write(self._result[i], c=INDICES)
-            self.write(self._ins_names[i], c=COMPOUNDS)
-            self.write(' + ', c=SYMBOLS)
-
-        if self._result[self._ins_count-1] != 1:
-            self.write(self._result[self._ins_count-1], c=INDICES)
-        self.write(self._ins_names[self._ins_count-1], c=COMPOUNDS)
-        self.write(' -> ', c=SYMBOLS)
-
-        for i in range(self._outs_count-1):
-            if self._result[i+self._ins_count] != 1:
-                self.write(self._result[i+self._ins_count], c=INDICES)
-            self.write(self._outs_names[i], c=COMPOUNDS)
-            self.write(' + ', c=SYMBOLS)
-
-        if self._result[self._ins_count+self._outs_count-1] != 1:
-            self.write(
-                self._result[self._ins_count+self._outs_count-1], c=INDICES)
-        self.write(self._outs_names[self._outs_count-1], c=COMPOUNDS)
-        self._answer = ''.join(self._string_builder)
+    def build_answer(self) -> None:
+        self._answer = ([], [])
+        for i in range(self._ins_count):
+            self._answer[0].append((self._result[i], self._ins_names[i]))
+        for i in range(self._outs_count):
+            self._answer[1].append((self._result[i+self._ins_count],
+                                    self._outs_names[i]))
 
     def run(self) -> None:
         try:
             self.parse()
         except ValueError:
             return
-
         self._parsed = True
         self.solve()
         if any(map(lambda x: x == 0, self._result)):
             return
         self._solved = True
-        self.buildAnswer()
+        self.build_answer()
 
 
 def main():
-    # p = Parser('H2O(SO3)2+H2O+H2SO4PQW')
-    # r = p.parseEquationSide()
-    # print(r)
-    # return
+    printer = Printer()
     while True:
-        question = input(f'\033[38;5;{INTERFACE}m?> \033[0m').strip()
+        question = input('?> ').strip()
         if question.strip() == '':
             continue
         solver = EquationSolver(question)
         solver.run()
         if not solver.parsed():
-            print(f'   \033[38;5;{ERRORS}mInvalid equation!\033[0m')
+            print('   Invalid equation!')
             continue
         if not solver.solved():
-            print(f'   \033[38;5;{COMPOUNDS}mUnsolvable equation!\033[0m')
+            print('   Unsolvable equation!')
             continue
-        print(f'\033[38;5;{INTERFACE}m!> \033[0m{solver.answer()}')
+        printer.write('!> ')
+        printer.print_reaction(*solver.result())
+        printer.write('\n')
+    # while True:
+    #     question = input(f'\033[38;5;{INTERFACE}m?> \033[0m').strip()
+    #     if question.strip() == '':
+    #         continue
+    #     solver = EquationSolver(question)
+    #     solver.run()
+    #     if not solver.parsed():
+    #         print(f'   \033[38;5;{ERRORS}mInvalid equation!\033[0m')
+    #         continue
+    #     if not solver.solved():
+    #         print(f'   \033[38;5;{COMPOUNDS}mUnsolvable equation!\033[0m')
+    #         continue
+    #     print(f'\033[38;5;{INTERFACE}m!> \033[0m{solver.answer()}')
 
 
 if __name__ == '__main__':
